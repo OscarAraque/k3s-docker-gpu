@@ -1,0 +1,22 @@
+{
+  "project": {
+    "name": "k3s-docker-gpu",
+    "description": "GPU-enabled Docker containers for K3s with Python and UV package management"
+  },
+  "development": {
+    "python_version": "3.12",
+    "package_manager": "uv",
+    "gpu_framework": "cupy",
+    "container_runtime": "docker",
+    "orchestration": "k3s"
+  },
+  "commands": {
+    "build": "./build.sh",
+    "run": "docker run --rm --gpus all gpu-uv-test:latest",
+    "deploy": "kubectl apply -f deployment.yaml"
+  },
+  "testing": {
+    "gpu_host": "p7",
+    "gpu_model": "NVIDIA GeForce GTX 1060 6GB"
+  }
+}
