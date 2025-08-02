@@ -35,7 +35,8 @@ venv.bak/
 
 # UV
 .uv/
-uv.lock
+# Keep uv.lock in version control for reproducible builds
+# uv.lock
 .python-version
 
 # IDEs and Editors

@@ -4,32 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-This is a minimal test project for deploying GPU-enabled Docker containers to a k3s cluster running on host 'p7' with an NVIDIA GeForce GTX 1060 6GB GPU.
+This project demonstrates GPU-enabled Docker containers for k3s clusters, using UV for Python dependency management and NVIDIA CUDA for GPU acceleration. Target deployment is host 'p7' with NVIDIA GeForce GTX 1060 6GB.
 
 ## Key Commands
 
-### Build and Deploy
-- Build Docker image: `./build.sh`
-- Deploy to k3s on p7: `./deploy.sh`
-- Check deployment: `ssh user@p7 'sudo kubectl get pods -l app=gpu-test'`
-- View logs: `ssh user@p7 'sudo kubectl logs -l app=gpu-test -f'`
-- Delete deployment: `ssh user@p7 'sudo kubectl delete deployment gpu-test'`
+### Dependency Management (UV)
+- Generate lock file: `uv lock`
+- Add dependency: `uv add <package>`
+- Update dependencies: `uv lock --upgrade`
+- Verify lock file: `uv lock --check`
 
-### Image Transfer (if building locally)
-```bash
-scp gpu-test.tar user@p7:/tmp/
-ssh user@p7 'docker load -i /tmp/gpu-test.tar'
-ssh user@p7 'sudo k3s ctr images import /tmp/gpu-test.tar'
-```
+### Build and Run
+- Build Docker image: `./build.sh`
+- Run container: `./run.sh`
+- Run detached: `docker run -d --name gpu-test --gpus all gpu-uv-test:latest`
+
+### K3s Deployment
+- Save image: `docker save gpu-uv-test:latest -o gpu-uv-test.tar`
+- Transfer to p7: `scp gpu-uv-test.tar user@p7:/tmp/`
+- Import to k3s: `ssh user@p7 'sudo k3s ctr images import /tmp/gpu-uv-test.tar'`
+- Deploy: `kubectl apply -f deployment.yaml`
+- Check pods: `kubectl get pods -l app=gpu-uv-test`
+- View logs: `kubectl logs -l app=gpu-uv-test -f`
 
 ## Architecture
 
 ### Components
-- **Dockerfile**: NVIDIA CUDA 11.8 base image with Python and PyTorch for GPU testing
-- **gpu_test.py**: Tests GPU availability, reports specs, runs benchmarks, stays running for monitoring
-- **deployment.yaml**: k8s manifest with GPU resource requests, node selector for p7, and GPU tolerations
-- **build.sh**: Builds Docker image and creates tar for transfer
-- **deploy.sh**: Deploys to k3s via SSH to p7
+- **Dockerfile**: Multi-stage build with NVIDIA CUDA 12.2 and UV-managed Python 3.12
+- **pyproject.toml**: Single source of truth for dependencies (CuPy, NumPy, psutil)
+- **uv.lock**: Locked dependency versions for reproducible builds
+- **src/gpu_test.py**: GPU testing script with benchmarks and continuous monitoring
+- **deployment.yaml**: K3s manifest with GPU resources and p7 node selector
+- **build.sh**: Build script that checks for uv.lock and builds image
+- **run.sh**: Run script with GPU support detection
 
 ### Deployment Strategy
 - Uses `imagePullPolicy: Never` to use local images
@@ -38,7 +45,21 @@ ssh user@p7 'sudo k3s ctr images import /tmp/gpu-test.tar'
 - Includes NVIDIA environment variables for GPU visibility
 
 ## Important Considerations
-- The p7 host must have NVIDIA drivers and k3s NVIDIA device plugin installed
-- SSH access to p7 is required for deployment
-- The container stays running indefinitely for monitoring purposes
-- GPU test performs matrix multiplication benchmarks to verify CUDA functionality
+
+### Dependency Management
+- All Python dependencies MUST be defined in `pyproject.toml` only (DRY principle)
+- Never use requirements.txt - it duplicates information
+- Always commit `uv.lock` for reproducible builds
+- Run `uv lock` after any dependency changes
+
+### Technical Requirements
+- p7 host must have NVIDIA drivers and k3s NVIDIA device plugin
+- Docker needs NVIDIA Container Toolkit for GPU support
+- Runtime image uses cuda:12.2.0-devel (not runtime) for CuPy JIT compilation
+- Container runs continuously for monitoring purposes
+
+### UV and Python Management
+- UV manages Python installation (no system Python needed)
+- Virtual environment created with: `uv venv .venv --python 3.12`
+- Dependencies synced with: `uv sync --frozen --no-install-project`
+- This ensures exact reproducibility across all environments

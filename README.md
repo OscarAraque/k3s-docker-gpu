@@ -35,25 +35,62 @@ git clone <repository-url>
 cd k3s-docker-gpu
 ```
 
-### 2. Build the Docker Image
+### 2. Generate Lock File (First Time Setup)
 
 ```bash
-# Build with UV package management
-docker build -f Dockerfile -t gpu-uv-test:latest .
+# Install UV if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Generate uv.lock from pyproject.toml
+uv lock
 ```
 
-### 3. Run Locally
+### 3. Build the Docker Image
 
 ```bash
-# Test GPU functionality
+# Build with UV-managed Python and locked dependencies
+./build.sh
+
+# Or manually:
+docker build -t gpu-uv-test:latest .
+
+# The build process:
+# - Requires uv.lock file (generated in step 2)
+# - Uses multi-stage build for optimization
+# - Installs Python 3.12 via UV (no system Python)
+# - Syncs exact dependencies from lock file
+```
+
+### 4. Run Locally
+
+```bash
+# Test GPU functionality (interactive)
+./run.sh
+
+# Or manually:
 docker run --rm --gpus all gpu-uv-test:latest
+
+# Run in detached mode for continuous monitoring
+docker run -d --name gpu-test --gpus all gpu-uv-test:latest
+
+# View logs
+docker logs -f gpu-test
+
+# Stop and remove
+docker stop gpu-test && docker rm gpu-test
 ```
 
-### 4. Deploy to K3s
+### 5. Deploy to K3s
 
 ```bash
-# Load image to K3s
-sudo k3s ctr images import gpu-uv-test.tar
+# Save image for transfer to K3s node
+docker save gpu-uv-test:latest -o gpu-uv-test.tar
+
+# Transfer to K3s node (e.g., p7)
+scp gpu-uv-test.tar user@p7:/tmp/
+
+# Load image on K3s node
+ssh user@p7 'sudo k3s ctr images import /tmp/gpu-uv-test.tar'
 
 # Deploy
 kubectl apply -f deployment.yaml
@@ -67,24 +104,46 @@ kubectl logs -l app=gpu-uv-test -f
 
 ```
 k3s-docker-gpu/
-├── Dockerfile              # Main Dockerfile with UV and CUDA support
-├── requirements.txt        # Python dependencies
-├── pyproject.toml         # UV/Python project configuration
+├── Dockerfile              # Multi-stage build with UV-managed Python
+├── pyproject.toml         # Project dependencies and metadata
+├── uv.lock               # Locked dependency versions (generated)
 ├── src/
-│   └── gpu_test.py        # GPU testing and monitoring script
-├── deployment.yaml        # K3s deployment manifest
-├── CLAUDE.md             # Documentation for Claude AI assistance
-└── .claude/              # Claude AI project configuration
-    └── settings.json     # Project settings
+│   ├── __init__.py       # Package marker
+│   └── gpu_test.py       # GPU testing and monitoring script
+├── build.sh             # Build Docker image
+├── run.sh               # Run Docker container
+├── deployment.yaml      # K3s deployment manifest
+├── LICENSE              # MIT License
+├── README.md            # This file
+├── CLAUDE.md           # Documentation for Claude AI
+└── .claude/            # Claude AI configuration
+    └── settings.json   # Project settings
 ```
 
-## Docker Images
+## Docker Build Details
 
-Multiple Dockerfile options are available:
+The main `Dockerfile` uses a multi-stage build approach:
 
-- `Dockerfile` - Production image with UV package management and CUDA development tools
-- `Dockerfile.runtime` - Lighter runtime-only image (if you don't need compilation)
-- `Dockerfile.multistage` - Multi-stage build for smallest final image
+### Stage 1: Builder
+- Base: `nvidia/cuda:12.2.0-devel-ubuntu22.04`
+- Installs UV package manager from official image
+- Uses UV to install Python 3.12 (no system Python needed!)
+- Creates virtual environment: `uv venv .venv --python 3.12`
+- Syncs exact dependencies: `uv sync --frozen --no-install-project`
+
+### Stage 2: Runtime
+- Base: `nvidia/cuda:12.2.0-devel-ubuntu22.04` (includes CUDA headers for CuPy JIT)
+- Copies only the virtual environment from builder
+- Copies UV-managed Python installation
+- Minimal system dependencies (ca-certificates, libssl3)
+- Results in optimized image with full GPU support
+
+### Key Features:
+- **Single source of truth**: Dependencies only in `pyproject.toml`
+- **Reproducible builds**: `uv.lock` pins exact versions with hashes
+- **UV-managed Python**: No system Python packages required
+- **CUDA JIT support**: Development headers included for CuPy compilation
+- **Multi-stage optimization**: Build artifacts not in final image
 
 ## GPU Testing
 
@@ -98,10 +157,12 @@ The included `gpu_test.py` script performs:
 
 ## Dependencies
 
-Managed via UV in `requirements.txt`:
-- `cupy-cuda12x` - GPU acceleration library
+All dependencies are defined in `pyproject.toml` and locked in `uv.lock`:
+- `cupy-cuda12x>=13.0.0` - GPU acceleration library for CUDA 12.x
 - `numpy<2.0` - Numerical computing (compatible version)
-- `psutil` - System monitoring
+- `psutil>=5.9.0` - System and process monitoring
+
+The lock file ensures reproducible builds with exact versions and cryptographic hashes.
 
 ## Development
 
@@ -111,21 +172,52 @@ Managed via UV in `requirements.txt`:
 # Install UV
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# Install Python 3.12 using UV (no system Python needed!)
+uv python install 3.12
+
 # Create virtual environment
 uv venv --python 3.12
 
-# Install dependencies
-uv pip install -r requirements.txt
+# Sync dependencies from lock file
+uv sync
 
-# Run tests
+# Activate environment and run tests
+source .venv/bin/activate
 python src/gpu_test.py
+```
+
+### Managing Dependencies
+
+```bash
+# Add a new dependency to pyproject.toml
+uv add <package-name>
+
+# Remove a dependency
+uv remove <package-name>
+
+# Update lock file with latest compatible versions
+uv lock --upgrade
+
+# Update specific package only
+uv lock --upgrade-package <package-name>
+
+# Verify lock file is up to date
+uv lock --check
+
+# After any changes, rebuild Docker image
+./build.sh
 ```
 
 ### Building for Different CUDA Versions
 
-Edit `requirements.txt` to use different CuPy versions:
+Edit `pyproject.toml` to use different CuPy versions:
 - `cupy-cuda11x` for CUDA 11.x
-- `cupy-cuda12x` for CUDA 12.x
+- `cupy-cuda12x` for CUDA 12.x (current)
+
+Then regenerate the lock file:
+```bash
+uv lock
+```
 
 ## Deployment
 
@@ -164,19 +256,35 @@ kubectl exec <pod-name> -- nvidia-smi
 
 1. Verify NVIDIA drivers: `nvidia-smi`
 2. Check Docker GPU support: `docker run --rm --gpus all nvidia/cuda:12.2.0-base nvidia-smi`
-3. Ensure NVIDIA Container Toolkit is installed
+3. Ensure NVIDIA Container Toolkit is installed:
+   ```bash
+   # Ubuntu/Debian
+   distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+   curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+   curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   sudo systemctl restart docker
+   ```
 
 ### Build Issues
 
-- Use `Dockerfile` with devel image for CUDA compilation support
-- Check internet connectivity for package downloads
-- Increase Docker build timeout for slow connections
+- **Missing uv.lock**: Run `uv lock` to generate it
+- **Slow dependency downloads**: UV caches packages, subsequent builds are faster
+- **CUDA compilation errors**: Ensure using `cuda:12.2.0-devel` base image (not runtime)
+- **Out of space**: Clean Docker cache with `docker system prune`
+
+### Runtime Issues
+
+- **CuPy compilation errors**: The runtime needs CUDA headers, use devel image
+- **Memory errors**: Reduce matrix size in gpu_test.py or add memory limits
+- **Python version mismatch**: UV manages Python 3.12, ensure consistency
 
 ### K3s Deployment Issues
 
 1. Check pod status: `kubectl describe pod <pod-name>`
 2. Verify GPU resources: `kubectl describe node <node-name> | grep nvidia`
 3. Check device plugin: `kubectl get pods -n kube-system | grep nvidia`
+4. Image not found: Ensure image is imported with `k3s ctr images import`
 
 ## Contributing
 

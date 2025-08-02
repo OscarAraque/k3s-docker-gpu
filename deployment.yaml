@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-uv-test
+  namespace: default
+  labels:
+    app: gpu-uv-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-uv-test
+  template:
+    metadata:
+      labels:
+        app: gpu-uv-test
+    spec:
+      containers:
+      - name: gpu-uv-test
+        image: gpu-uv-test:latest
+        imagePullPolicy: Never  # Use local image
+        resources:
+          limits:
+            nvidia.com/gpu: 1  # Request 1 GPU
+          requests:
+            nvidia.com/gpu: 1
+            memory: "2Gi"
+            cpu: "1000m"
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "compute,utility"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+      nodeSelector:
+        kubernetes.io/hostname: p7  # Deploy specifically to p7 node
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-uv-test-service
+  namespace: default
+spec:
+  selector:
+    app: gpu-uv-test
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: ClusterIP
