@@ -1,111 +1,197 @@
-# K3s Docker GPU Test
+# K3s Docker GPU Project
 
-A minimal Docker image to test GPU functionality on a k3s cluster with NVIDIA GPU support.
+A production-ready setup for running GPU-accelerated Python workloads in Docker containers on K3s clusters.
+
+## Overview
+
+This project demonstrates how to:
+- Build Docker containers with NVIDIA GPU support
+- Use UV for Python dependency management
+- Deploy GPU workloads to K3s clusters
+- Test and monitor GPU performance
+
+## Features
+
+- 🐍 **Python 3.12** with UV package manager
+- 🎮 **NVIDIA CUDA 12.2** support
+- 📦 **CuPy** for GPU-accelerated computing
+- 🚀 **K3s** deployment ready
+- 🔧 **Multiple Dockerfile options** for different use cases
+- 📊 **Comprehensive GPU testing and monitoring**
 
 ## Prerequisites
 
-- Docker installed on build machine
-- k3s cluster with NVIDIA GPU support installed on p7 host
-- NVIDIA Container Toolkit configured on p7
-- SSH access to p7 host
-
-## Project Structure
-
-- `Dockerfile` - CUDA-enabled container with Python and PyTorch
-- `gpu_test.py` - Python script to test GPU availability and performance
-- `deployment.yaml` - Kubernetes deployment manifest for k3s
-- `build.sh` - Script to build the Docker image
-- `deploy.sh` - Script to deploy to k3s cluster on p7
+- NVIDIA GPU with drivers installed (tested on GTX 1060 6GB)
+- Docker with NVIDIA Container Toolkit
+- Python 3.12+ for local development
+- K3s cluster with NVIDIA device plugin (for deployment)
 
 ## Quick Start
 
-### 1. Build the Docker Image
+### 1. Clone the Repository
 
 ```bash
-./build.sh
+git clone <repository-url>
+cd k3s-docker-gpu
 ```
 
-This creates a Docker image tagged as `gpu-test:latest` and saves it to `gpu-test.tar`.
-
-### 2. Transfer Image to p7 (if building locally)
+### 2. Build the Docker Image
 
 ```bash
-# Copy the image tar file to p7
-scp gpu-test.tar user@p7:/tmp/
-
-# Load the image on p7
-ssh user@p7 'docker load -i /tmp/gpu-test.tar'
-
-# Import to k3s container runtime
-ssh user@p7 'sudo k3s ctr images import /tmp/gpu-test.tar'
+# Build with UV package management
+docker build -f Dockerfile -t gpu-uv-test:latest .
 ```
 
-### 3. Deploy to k3s
+### 3. Run Locally
 
 ```bash
-./deploy.sh
+# Test GPU functionality
+docker run --rm --gpus all gpu-uv-test:latest
 ```
 
-### 4. Check Deployment Status
+### 4. Deploy to K3s
 
 ```bash
-# Check pod status
-ssh user@p7 'sudo kubectl get pods -l app=gpu-test'
+# Load image to K3s
+sudo k3s ctr images import gpu-uv-test.tar
 
-# View logs
-ssh user@p7 'sudo kubectl logs -l app=gpu-test -f'
+# Deploy
+kubectl apply -f deployment.yaml
+
+# Check status
+kubectl get pods -l app=gpu-uv-test
+kubectl logs -l app=gpu-uv-test -f
 ```
 
-## What the Test Does
+## Project Structure
 
-The GPU test script:
-1. Checks CUDA availability
-2. Lists available GPUs (should show GTX 1060 6GB)
-3. Reports GPU memory
-4. Performs matrix multiplication benchmarks
-5. Monitors memory usage
-6. Keeps running for monitoring purposes
+```
+k3s-docker-gpu/
+├── Dockerfile              # Main Dockerfile with UV and CUDA support
+├── requirements.txt        # Python dependencies
+├── pyproject.toml         # UV/Python project configuration
+├── src/
+│   └── gpu_test.py        # GPU testing and monitoring script
+├── deployment.yaml        # K3s deployment manifest
+├── CLAUDE.md             # Documentation for Claude AI assistance
+└── .claude/              # Claude AI project configuration
+    └── settings.json     # Project settings
+```
 
-## Cleanup
+## Docker Images
 
-To remove the deployment:
+Multiple Dockerfile options are available:
+
+- `Dockerfile` - Production image with UV package management and CUDA development tools
+- `Dockerfile.runtime` - Lighter runtime-only image (if you don't need compilation)
+- `Dockerfile.multistage` - Multi-stage build for smallest final image
+
+## GPU Testing
+
+The included `gpu_test.py` script performs:
+
+1. **Environment verification** - Python version, virtual environment, system resources
+2. **NVIDIA driver check** - GPU detection and driver information
+3. **CUDA/CuPy tests** - GPU compute capability and memory information
+4. **Performance benchmarks** - Matrix multiplication performance tests
+5. **Continuous monitoring** - Real-time GPU utilization tracking
+
+## Dependencies
+
+Managed via UV in `requirements.txt`:
+- `cupy-cuda12x` - GPU acceleration library
+- `numpy<2.0` - Numerical computing (compatible version)
+- `psutil` - System monitoring
+
+## Development
+
+### Local Setup with UV
 
 ```bash
-ssh user@p7 'sudo kubectl delete deployment gpu-test'
+# Install UV
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment
+uv venv --python 3.12
+
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Run tests
+python src/gpu_test.py
+```
+
+### Building for Different CUDA Versions
+
+Edit `requirements.txt` to use different CuPy versions:
+- `cupy-cuda11x` for CUDA 11.x
+- `cupy-cuda12x` for CUDA 12.x
+
+## Deployment
+
+### K3s Prerequisites
+
+1. Install NVIDIA drivers on the host
+2. Install NVIDIA Container Toolkit
+3. Install K3s with GPU support
+4. Deploy NVIDIA device plugin to K3s
+
+### Deployment Configuration
+
+The `deployment.yaml` includes:
+- GPU resource requests (`nvidia.com/gpu: 1`)
+- Node selector for specific hosts
+- Environment variables for CUDA
+- Tolerations for GPU nodes
+
+## Monitoring
+
+View GPU utilization:
+```bash
+# On host
+nvidia-smi
+
+# In container
+docker exec <container-id> nvidia-smi
+
+# In K3s pod
+kubectl exec <pod-name> -- nvidia-smi
 ```
 
 ## Troubleshooting
 
 ### GPU Not Detected
 
-If the container doesn't detect the GPU:
+1. Verify NVIDIA drivers: `nvidia-smi`
+2. Check Docker GPU support: `docker run --rm --gpus all nvidia/cuda:12.2.0-base nvidia-smi`
+3. Ensure NVIDIA Container Toolkit is installed
 
-1. Verify NVIDIA drivers on p7:
-   ```bash
-   ssh user@p7 'nvidia-smi'
-   ```
+### Build Issues
 
-2. Check k3s NVIDIA device plugin:
-   ```bash
-   ssh user@p7 'sudo kubectl get pods -n kube-system | grep nvidia'
-   ```
+- Use `Dockerfile` with devel image for CUDA compilation support
+- Check internet connectivity for package downloads
+- Increase Docker build timeout for slow connections
 
-3. Verify node GPU resources:
-   ```bash
-   ssh user@p7 'sudo kubectl describe node p7 | grep nvidia'
-   ```
+### K3s Deployment Issues
 
-### Container Fails to Start
+1. Check pod status: `kubectl describe pod <pod-name>`
+2. Verify GPU resources: `kubectl describe node <node-name> | grep nvidia`
+3. Check device plugin: `kubectl get pods -n kube-system | grep nvidia`
 
-Check pod events:
-```bash
-ssh user@p7 'sudo kubectl describe pod -l app=gpu-test'
-```
+## Contributing
 
-## Configuration
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test GPU functionality
+5. Submit a pull request
 
-The deployment is configured to:
-- Run on node `p7` specifically (via nodeSelector)
-- Request 1 NVIDIA GPU
-- Use local image (imagePullPolicy: Never)
-- Include GPU tolerations for scheduling
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with [UV](https://github.com/astral-sh/uv) for fast Python package management
+- Uses [CuPy](https://cupy.dev/) for GPU acceleration
+- Deployed on [K3s](https://k3s.io/) lightweight Kubernetes
