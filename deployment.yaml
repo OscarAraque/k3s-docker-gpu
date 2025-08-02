@@ -1,31 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gpu-uv-test
-  namespace: default
+  name: gpu-uv-test-simple
   labels:
-    app: gpu-uv-test
+    app: gpu-uv-test-simple
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: gpu-uv-test
+      app: gpu-uv-test-simple
   template:
     metadata:
       labels:
-        app: gpu-uv-test
+        app: gpu-uv-test-simple
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: p7
+      runtimeClassName: nvidia
       containers:
       - name: gpu-uv-test
         image: gpu-uv-test:latest
-        imagePullPolicy: Never  # Use local image
+        imagePullPolicy: Never
         resources:
-          limits:
-            nvidia.com/gpu: 1  # Request 1 GPU
           requests:
-            nvidia.com/gpu: 1
+            cpu: "1"
             memory: "2Gi"
-            cpu: "1000m"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
         env:
         - name: NVIDIA_VISIBLE_DEVICES
           value: "all"
@@ -33,23 +35,32 @@ spec:
           value: "compute,utility"
         - name: CUDA_VISIBLE_DEVICES
           value: "0"
-      nodeSelector:
-        kubernetes.io/hostname: p7  # Deploy specifically to p7 node
-      tolerations:
-      - key: nvidia.com/gpu
-        operator: Exists
-        effect: NoSchedule
+        volumeMounts:
+        - name: nvidia-dev
+          mountPath: /dev
+        - name: nvidia-lib
+          mountPath: /usr/local/nvidia
+          readOnly: true
+      volumes:
+      - name: nvidia-dev
+        hostPath:
+          path: /dev
+      - name: nvidia-lib
+        hostPath:
+          path: /usr/lib/x86_64-linux-gnu
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gpu-uv-test-service
-  namespace: default
+  name: gpu-uv-test-simple-service
+  labels:
+    app: gpu-uv-test-simple
 spec:
-  selector:
-    app: gpu-uv-test
   ports:
-  - protocol: TCP
-    port: 80
+  - port: 80
     targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: gpu-uv-test-simple
   type: ClusterIP

@@ -46,11 +46,17 @@ if [ $? -eq 0 ]; then
     docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}" | grep ${IMAGE_NAME}:${IMAGE_TAG}
     
     echo ""
-    echo "To run the container:"
+    echo "To run the container locally:"
+    echo "  ./run.sh"
+    echo "  # or manually:"
     echo "  docker run --rm --gpus all ${IMAGE_NAME}:${IMAGE_TAG}"
     echo ""
-    echo "To run in detached mode:"
-    echo "  docker run -d --name gpu-test --gpus all ${IMAGE_NAME}:${IMAGE_TAG}"
+    echo "To deploy to K3s:"
+    echo "  kubectl apply -f deployment.yaml"
+    echo ""
+    echo "To import into K3s (if needed):"
+    echo "  docker save ${IMAGE_NAME}:${IMAGE_TAG} -o ${IMAGE_NAME}.tar"
+    echo "  sudo k3s ctr images import ${IMAGE_NAME}.tar"
 else
     echo "❌ Build failed!"
     exit 1

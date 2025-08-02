@@ -21,12 +21,18 @@ This project demonstrates how to:
 
 ## Prerequisites
 
-- NVIDIA GPU with drivers installed (tested on GTX 1060 6GB)
+- NVIDIA GPU with drivers installed (✅ tested on GTX 1060 6GB)
 - Docker with NVIDIA Container Toolkit
-- Python 3.12+ for local development
-- K3s cluster with NVIDIA device plugin (for deployment)
+- Python 3.12+ for local development  
+- K3s cluster with nvidia runtime class (✅ working setup)
 
 ## Quick Start
+
+🚀 **TL;DR**: For immediate deployment on a working K3s cluster with NVIDIA support:
+```bash
+./build.sh    # Build the container
+./deploy.sh   # Deploy to K3s and test GPU
+```
 
 ### 1. Clone the Repository
 
@@ -83,41 +89,46 @@ docker stop gpu-test && docker rm gpu-test
 ### 5. Deploy to K3s
 
 ```bash
-# Save image for transfer to K3s node
+# Deploy with automated script (recommended)
+./deploy.sh
+
+# Or manually:
+# 1. Import image to K3s
 docker save gpu-uv-test:latest -o gpu-uv-test.tar
+sudo k3s ctr images import gpu-uv-test.tar
+rm gpu-uv-test.tar
 
-# Transfer to K3s node (e.g., p7)
-scp gpu-uv-test.tar user@p7:/tmp/
-
-# Load image on K3s node
-ssh user@p7 'sudo k3s ctr images import /tmp/gpu-uv-test.tar'
-
-# Deploy
+# 2. Deploy using nvidia runtime
 kubectl apply -f deployment.yaml
 
-# Check status
-kubectl get pods -l app=gpu-uv-test
-kubectl logs -l app=gpu-uv-test -f
+# 3. Check status
+kubectl get pods -l app=gpu-uv-test-simple
+kubectl logs -l app=gpu-uv-test-simple -f
+
+# 4. Test GPU access
+kubectl exec <pod-name> -- nvidia-smi
+kubectl exec <pod-name> -- python3 -c "import cupy as cp; print('GPU available:', cp.cuda.is_available())"
 ```
 
 ## Project Structure
 
 ```
 k3s-docker-gpu/
-├── Dockerfile              # Multi-stage build with UV-managed Python
-├── pyproject.toml         # Project dependencies and metadata
-├── uv.lock               # Locked dependency versions (generated)
+├── Dockerfile                    # Multi-stage build with UV-managed Python
+├── pyproject.toml               # Project dependencies and metadata
+├── uv.lock                     # Locked dependency versions (generated)
 ├── src/
-│   ├── __init__.py       # Package marker
-│   └── gpu_test.py       # GPU testing and monitoring script
-├── build.sh             # Build Docker image
-├── run.sh               # Run Docker container
-├── deployment.yaml      # K3s deployment manifest
-├── LICENSE              # MIT License
-├── README.md            # This file
-├── CLAUDE.md           # Documentation for Claude AI
-└── .claude/            # Claude AI configuration
-    └── settings.json   # Project settings
+│   ├── __init__.py             # Package marker
+│   └── gpu_test.py             # GPU testing and monitoring script
+├── build.sh                    # Build Docker image
+├── run.sh                      # Run Docker container locally
+├── deploy.sh                   # Deploy to K3s (automated)
+├── deployment.yaml             # K3s deployment with nvidia runtime
+├── LICENSE                     # MIT License
+├── README.md                   # This file
+├── CLAUDE.md                   # Documentation for Claude AI
+└── .claude/                    # Claude AI configuration
+    └── settings.json           # Project settings
 ```
 
 ## Docker Build Details
@@ -223,18 +234,37 @@ uv lock
 
 ### K3s Prerequisites
 
-1. Install NVIDIA drivers on the host
-2. Install NVIDIA Container Toolkit
-3. Install K3s with GPU support
-4. Deploy NVIDIA device plugin to K3s
+1. **NVIDIA Drivers**: Install NVIDIA drivers on the host
+   ```bash
+   # Verify drivers
+   nvidia-smi
+   ```
+
+2. **NVIDIA Container Toolkit**: Install for Docker/containerd GPU support
+   ```bash
+   # Configure for Docker
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+
+3. **K3s with GPU Support**: Install K3s (automatically includes nvidia runtime)
+   ```bash
+   # K3s installation includes nvidia runtime class by default
+   kubectl get runtimeclass
+   ```
+
+### Deployment Approaches
 
 ### Deployment Configuration
 
-The `deployment.yaml` includes:
-- GPU resource requests (`nvidia.com/gpu: 1`)
-- Node selector for specific hosts
-- Environment variables for CUDA
-- Tolerations for GPU nodes
+The `deployment.yaml` uses the **NVIDIA Runtime Class approach**:
+- `runtimeClassName: nvidia` for direct GPU access
+- Host volume mounts for GPU devices (`/dev`, `/usr/lib/x86_64-linux-gnu`)
+- No NVIDIA device plugin required
+- Reliable GPU access through nvidia-container-runtime
+- Standard CPU/memory resource requests (no GPU resource requests)
+
+> **Note**: This approach bypasses the complex NVIDIA device plugin setup and provides direct, reliable GPU access.
 
 ## Monitoring
 
@@ -281,10 +311,43 @@ kubectl exec <pod-name> -- nvidia-smi
 
 ### K3s Deployment Issues
 
-1. Check pod status: `kubectl describe pod <pod-name>`
-2. Verify GPU resources: `kubectl describe node <node-name> | grep nvidia`
-3. Check device plugin: `kubectl get pods -n kube-system | grep nvidia`
-4. Image not found: Ensure image is imported with `k3s ctr images import`
+1. **Pod stuck in Pending**:
+   ```bash
+   kubectl describe pod <pod-name>
+   # Check for scheduling issues, image availability
+   ```
+
+2. **GPU not accessible in container**:
+   ```bash
+   # Test GPU access
+   kubectl exec <pod-name> -- nvidia-smi
+   
+   # Check runtime class
+   kubectl get runtimeclass nvidia
+   
+   # Verify NVIDIA Container Toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   ```
+
+3. **Image not found**:
+   ```bash
+   # Check image availability
+   sudo k3s ctr images list | grep gpu-uv-test
+   
+   # Import if missing
+   docker save gpu-uv-test:latest -o gpu-uv-test.tar
+   sudo k3s ctr images import gpu-uv-test.tar
+   ```
+
+4. **Runtime class issues**:
+   ```bash
+   # Verify nvidia runtime class exists
+   kubectl get runtimeclass nvidia
+   
+   # If missing, check NVIDIA Container Toolkit setup
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
 
 ## Contributing
 
@@ -298,8 +361,17 @@ kubectl exec <pod-name> -- nvidia-smi
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Success Story
+
+✅ **Deployment Successful!** This project successfully demonstrates:
+- GPU-accelerated Python containers with UV dependency management
+- Seamless K3s deployment using nvidia runtime class
+- CuPy GPU computing in a Kubernetes environment
+- Production-ready Docker builds with reproducible dependencies
+
 ## Acknowledgments
 
 - Built with [UV](https://github.com/astral-sh/uv) for fast Python package management
 - Uses [CuPy](https://cupy.dev/) for GPU acceleration
 - Deployed on [K3s](https://k3s.io/) lightweight Kubernetes
+- NVIDIA Container Toolkit for seamless GPU integration
